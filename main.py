@@ -2,6 +2,7 @@
 
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
+from itertools import chain
 import json
 from typing import Optional, List, Dict, Any
 import subprocess
@@ -189,6 +190,10 @@ class I3Root(I3Node):
         base = I3Node._from_dict_internal(data)
         return I3Root(**base.__dict__)
 
+    def get_outputs(self) -> List['I3Output']:
+        """Get all output nodes from the root"""
+        return [node for node in self.nodes if isinstance(node, I3Output)]
+
 
 @dataclass
 class I3Output(I3Node):
@@ -199,6 +204,10 @@ class I3Output(I3Node):
         """Create I3Output from dictionary"""
         base = I3Node._from_dict_internal(data)
         return I3Output(**base.__dict__)
+
+    def get_containers(self) -> List['I3Container']:
+        """Get all container nodes from the output"""
+        return [node for node in self.nodes if isinstance(node, I3Container)]
 
 
 @dataclass
@@ -238,6 +247,10 @@ class I3Container(I3Node):
             window_properties=WindowProperties.from_dict(window_props) if window_props else None,
             actual_deco_rect=Rect.from_dict(actual_deco) if actual_deco else None
         )
+
+    def get_workspaces(self) -> List['I3Workspace']:
+        """Get all workspace nodes from the container"""
+        return [node for node in self.nodes if isinstance(node, I3Workspace)]
 
 
 @dataclass
@@ -303,22 +316,49 @@ def find_focused_node(node: I3Node) -> Optional[I3Node]:
             return focused
     return None
 
+def find_focused_workspace(node: I3Node, parent_workspace: Optional[I3Workspace] = None) -> Optional[I3Workspace]:
+    """Recursively find the focused workspace in the i3 tree"""
+    if isinstance(node, I3Workspace):
+        parent_workspace = node
+    if node.focused:
+        return parent_workspace
+    for child in node.nodes:
+        focused = find_focused_workspace(child, parent_workspace)
+        if focused:
+            return focused
+    for child in node.floating_nodes:
+        focused = find_focused_workspace(child)
+        if focused:
+            return focused
+    return None
 
-def main():
-    print("Hello from i3-client!")
+def get_workspace(tree: I3Node, workspace_id: str) -> Optional[I3Workspace]:
+    """Get a workspace by its ID (name)"""
+    for output in tree.get_outputs():
+        for container in output.get_containers():
+            for workspace in container.get_workspaces():
+                if workspace.name == workspace_id:
+                    return workspace
 
-    args = parse_args()
-    if args['grab']:
-        tree = get_i3_tree()
-    else:
-        tree = load_i3_tree(args['fpath'])
+    raise ValueError(f"Workspace with ID {workspace_id} not found")
 
-    print(f"Loaded i3 tree: {tree.type} node with {len(tree.nodes)} child nodes")
+def windows_in_workspace(workspace: I3Workspace) -> List[I3Node]:
+    """Get all windows in a specified workspace"""
+    result = []
 
-    focused = find_focused_node(tree)
-    pp.ppd(focused)
+    def _collect_windows(node: I3Node):
+        for child in node.nodes:
+            if not child.nodes:
+                result.append(child)
+        for child in chain(node.nodes, node.floating_nodes):
+            _collect_windows(child)
 
-    # Print some info about the tree
+    _collect_windows(workspace)
+    return result
+
+
+def print_node_info(tree: I3Node):
+    'Print some info about the tree'
     for node in tree.nodes:
         if not isinstance(node, I3Output):
             continue
@@ -337,6 +377,36 @@ def main():
                     if node.focused:
                         colour, reset = "\x1b[32m", "\x1b[0m"
                     print(f"{colour}      Node ID {node.id}: {node.name} (type: {node.type}), focused: {node.focused}{reset}")
+
+def main():
+    print("Hello from i3-client!")
+
+    args = parse_args()
+    if args['grab']:
+        tree = get_i3_tree()
+    else:
+        tree = load_i3_tree(args['fpath'])
+
+    print(f"Loaded i3 tree: {tree.type} node with {len(tree.nodes)} child nodes")
+
+    focused = find_focused_node(tree)
+    pp.ppd({
+        'program': focused.window_properties.instance,
+        'name': focused.name,
+    }, indent=2)
+
+    focused_workspace = find_focused_workspace(tree)
+    pp.ppd({'focused_workspace': focused_workspace.name}, indent=None)
+
+    other_windows = windows_in_workspace(focused_workspace)
+    for w in other_windows:
+        pp.ppd({
+            'id': w.id,
+            'name': w.name,
+            'focused': w.focused,
+            'program': w.window_properties.instance if w.window_properties else None,
+        }, indent=2)
+
 
 
 if __name__ == "__main__":
