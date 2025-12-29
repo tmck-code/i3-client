@@ -7,17 +7,12 @@ from itertools import chain
 import json
 from typing import Optional, List, Dict, Any
 import subprocess
+import sys
 from typing import Iterable
 
 from pprint_ndjson import pp
 
 from i3_client.client import I3Node, I3Workspace, I3Output, I3Container, get_i3_tree, load_i3_tree
-
-def parse_args() -> Dict[str, Any]:
-    parser = ArgumentParser(description="i3-client example")
-    parser.add_argument('--fpath', type=str, default='i3_tree.json', help='Path to the i3 tree JSON file')
-    parser.add_argument('--grab', action='store_true', help='Grab the i3 tree from the running i3 instance')
-    return parser.parse_args().__dict__
 
 def find_focused_node(node: I3Node) -> Optional[I3Node]:
     """Recursively find the focused node in the i3 tree"""
@@ -63,7 +58,7 @@ def print_node_info(tree: I3Node, indent: int = 0):
                 # blue
                 colour, reset = "\x1b[34m", "\x1b[0m"
                 print(f"  {colour}▣{reset} Workspace {workspace.num}: {workspace.name}, focused: {workspace.focused}")
-                for node in workspace.nodes:
+                for node in workspace.get_windows():
                     colour, reset = "", ""
                     if node.focused:
                         colour, reset = "\x1b[32m", "\x1b[0m"
@@ -71,19 +66,12 @@ def print_node_info(tree: I3Node, indent: int = 0):
                     print(f"{colour}      - {node.window_properties.instance}{reset}")
                     print(f"{colour}      - {node.name}{reset}")
 
-def main():
-    args = parse_args()
-    if args['grab']:
-        tree = get_i3_tree()
-    else:
-        tree = load_i3_tree(args['fpath'])
-
+def list_i3_tree(tree: I3Node):
     print(f"Loaded i3 tree: {tree.type} node with {len(tree.nodes)} child nodes:\n")
 
     print_node_info(tree)
 
     focused = find_focused_node(tree)
-    # pp.ppd(focused, indent=None)
 
     focused_workspace = find_focused_workspace(tree)
     if not focused_workspace:
@@ -92,6 +80,7 @@ def main():
 
     print()
     pp.ppd({'focused_workspace': focused_workspace.name}, indent=None)
+    focused_window = None
     for w in focused_workspace.get_windows():
         pp.ppd(
             {
@@ -105,7 +94,61 @@ def main():
             },
             indent=None
         )
+        if w.focused:
+            focused_window = w
 
+    if focused_window:
+        print("\nFocused window:")
+        pp.ppd(
+            {
+                'focused': focused_window.focused,
+                'id': focused_window.id,
+                'window': {
+                    'name': focused_window.name,
+                    'program': focused_window.window_properties.instance,
+                    'title': focused_window.window_properties.title,
+                }
+            },
+            indent=None
+        )
+
+def check_exists_in_workspace(tree: I3Node, window_name: str) -> bool:
+    focused_workspace = find_focused_workspace(tree)
+    if not focused_workspace:
+        print("No focused workspace found")
+        return False
+
+    for w in focused_workspace.get_windows():
+        if w.window_properties.instance == window_name or w.name == window_name:
+            return True
+    return False
+
+
+def parse_args() -> Dict[str, Any]:
+    parser = ArgumentParser(description="i3-client example")
+    parser.add_argument('--fpath', type=str, default='i3_tree.json', help='Path to the i3 tree JSON file')
+    parser.add_argument('--grab', action='store_true', help='Grab the i3 tree from the running i3 instance')
+
+    parser.add_argument('--list', action='store_true', help='List the i3 tree structure')
+    parser.add_argument('--exists', type=str, help='Check if a window with the given name exists in the focused workspace')
+    return parser.parse_args().__dict__
+
+def main():
+    args = parse_args()
+    if args['grab']:
+        tree = get_i3_tree()
+    else:
+        tree = load_i3_tree(args['fpath'])
+
+    if args['list'] == True:
+        list_i3_tree(tree)
+    elif args['exists'] is not None:
+        exists = check_exists_in_workspace(tree, args['exists'])
+        pp.ppd({'window_name': args['exists'], 'exists_in_focused_workspace': exists}, indent=None, style=None)
+        if exists:
+            sys.exit(0)
+        else:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
