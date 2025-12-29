@@ -256,11 +256,15 @@ class I3Container(I3Node):
             actual_deco_rect=Rect.from_dict(actual_deco) if actual_deco else None
         )
 
-    def get_windows(self) -> Iterable[I3Window]:
-        """Get all window nodes in this container"""
+    def get_windows(self) -> Iterable['I3Node']:
+        """Yield all nodes in this container (recursively) that have a window property (i.e., are windows)."""
         for node in self.nodes:
-            if isinstance(node, I3Window):
+            # If this node has a window property, yield it
+            if getattr(node, 'window', None) is not None:
                 yield node
+            # Recurse into children
+            if hasattr(node, 'get_windows'):
+                yield from node.get_windows()
 
 @dataclass
 class I3Workspace(I3Node):
@@ -281,10 +285,12 @@ class I3Workspace(I3Node):
             output=data.get('output')
         )
 
-    def get_windows(self) -> Iterable[I3Window]:
-        """Get all window nodes in this workspace"""
+    def get_windows(self) -> Iterable['I3Node']:
+        """Yield all nodes in this workspace (recursively) that have a window property (i.e., are windows)."""
         for node in self.nodes:
-            if isinstance(node, I3Container):
+            if getattr(node, 'window', None) is not None:
+                yield node
+            if hasattr(node, 'get_windows'):
                 yield from node.get_windows()
 
 
