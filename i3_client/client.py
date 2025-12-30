@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 
 from __future__ import annotations
-from argparse import ArgumentParser
 from dataclasses import dataclass, field
-from itertools import chain
 import json
 from typing import Optional, List, Dict, Any
 import subprocess
 from typing import Iterable
-
-from pprint_ndjson import pp
 
 @dataclass
 class Rect:
@@ -257,13 +253,12 @@ class I3Container(I3Node):
         )
 
     def get_windows(self) -> Iterable['I3Node']:
-        """Yield all nodes in this container (recursively) that have a window property (i.e., are windows)."""
-        for node in self.nodes:
-            # If this node has a window property, yield it
+        """Yield all nodes in this container (recursively) that have a window property (i.e., are windows), including floating nodes."""
+        for node in self.nodes + self.floating_nodes:
             if getattr(node, 'window', None) is not None:
                 yield node
-            # Recurse into children
-            if hasattr(node, 'get_windows'):
+            # Only recurse if node is a container/workspace/floating container
+            if isinstance(node, (I3Container, I3Workspace, I3FloatingContainer)):
                 yield from node.get_windows()
 
 @dataclass
@@ -286,11 +281,12 @@ class I3Workspace(I3Node):
         )
 
     def get_windows(self) -> Iterable['I3Node']:
-        """Yield all nodes in this workspace (recursively) that have a window property (i.e., are windows)."""
-        for node in self.nodes:
+        """Yield all nodes in this workspace (recursively) that have a window property (i.e., are windows), including floating nodes."""
+        for node in self.nodes + self.floating_nodes:
             if getattr(node, 'window', None) is not None:
                 yield node
-            if hasattr(node, 'get_windows'):
+            # Only recurse if node is a container/workspace/floating container
+            if isinstance(node, (I3Container, I3Workspace, I3FloatingContainer)):
                 yield from node.get_windows()
 
 
@@ -298,6 +294,14 @@ class I3Workspace(I3Node):
 class I3FloatingContainer(I3Node):
     """Floating container node"""
     output: Optional[str] = None
+
+    def get_windows(self) -> Iterable['I3Node']:
+        """Yield all nodes in this floating container (recursively) that have a window property (i.e., are windows), including floating nodes."""
+        for node in self.nodes + self.floating_nodes:
+            if getattr(node, 'window', None) is not None:
+                yield node
+            if isinstance(node, (I3Container, I3Workspace, I3FloatingContainer)):
+                yield from node.get_windows()
 
     @staticmethod
     def _from_dict_internal(data: Dict[str, Any]) -> 'I3FloatingContainer':
